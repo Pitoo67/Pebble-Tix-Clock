@@ -7,19 +7,10 @@
 
  */
 
-#include "pebble_os.h"
-#include "pebble_app.h"
-#include "pebble_fonts.h"
+#include <pebble.h>
 #include "xprintf.h"
 
 
-
-#define MY_UUID { 0xAE, 0x9D, 0x29, 0xE1, 0x55, 0x17, 0x47, 0x8D, 0xAB, 0x43, 0x79, 0xE7, 0xAA, 0x08, 0x9E, 0x8F }
-PBL_APP_INFO(MY_UUID,
-             "TIX clock", "pitoo.com",
-             1, 2,
-             RESOURCE_ID_IMAGE_MENU_ICON,
-             APP_INFO_WATCH_FACE);
 
 #define WINDOW_NAME "tix_clock"
 
@@ -35,14 +26,14 @@ PBL_APP_INFO(MY_UUID,
 
 #define TIME_ZONE_OFFSET 1
 
-Window window;
-Layer display_layer;
-TextLayer bottombar_layer;
+Window *window;
+Layer *display_layer;
+TextLayer *bottombar_layer;
 
 
 unsigned long randSeed = 100;
 
-int get_unix_time_from_current_time(PblTm *current_time)
+int get_unix_time_from_current_time(struct tm *current_time)
 {
   unsigned int unix_time;
 
@@ -62,10 +53,10 @@ int get_unix_time_from_current_time(PblTm *current_time)
 
 int get_unix_time()
 {
-  PblTm current_time;
-  get_time(&current_time);
+  time_t now = time(NULL);
+  struct tm *t = localtime(&now);
 
-  return get_unix_time_from_current_time(&current_time);
+  return get_unix_time_from_current_time(t);
 }
 
 int random(int max)
@@ -169,15 +160,13 @@ unsigned short get_display_hour(unsigned short hour) {
 
 }
 
-void display_layer_update_callback(Layer *me, GContext* ctx) {
+static char infotxt[] = "TIX PEBBLE • DD-MM-YYYY";
 
-  (void)me;
-  PblTm t;
-
-  char* infotxt = "TIX PEBBLE • DD-MM-YYYY";
-
-  get_time(&t);
-  unsigned short display_hour = get_display_hour(t.tm_hour);
+static void display_layer_update_callback(Layer *me, GContext* ctx) {
+  time_t now = time(NULL);
+  
+  struct tm *t = localtime(&now);
+  unsigned short display_hour = get_display_hour(t->tm_hour);
 
   draw_cells_for_digit(ctx, (display_hour / 10), 0, 0, 6);
   draw_cells_for_digit(ctx, (display_hour % 10), 1, 0, 9);
@@ -185,68 +174,63 @@ void display_layer_update_callback(Layer *me, GContext* ctx) {
 //  draw_cells_for_digit(ctx, (t.tm_sec / 10), 0, 0, 6);
 //  draw_cells_for_digit(ctx, (t.tm_sec % 10), 1, 0, 9);
 
-  draw_cells_for_digit(ctx, (t.tm_min / 10), 0, 1, 6);
-  draw_cells_for_digit(ctx, (t.tm_min % 10), 1, 1, 9);
+  draw_cells_for_digit(ctx, (t->tm_min / 10), 0, 1, 6);
+  draw_cells_for_digit(ctx, (t->tm_min % 10), 1, 1, 9);
 
-  xsprintf(infotxt, "TIX PEBBLE • %d %d", t.tm_mday, (t.tm_mon + 1));
+  xsprintf(infotxt, "TIX PEBBLE • %d %d", t->tm_mday, (t->tm_mon + 1));
 //  xsprintf(infotxt, "TIX PEBBLE • %d %d", t.tm_hour, t.tm_min);
-  text_layer_set_text(&bottombar_layer, infotxt);
+  text_layer_set_text(bottombar_layer, infotxt);
 }
 
-void handle_second_tick(AppContextRef ctx, PebbleTickEvent *t) {
-
-  (void)ctx; // TODO: Pass tick event/PblTime rather than make layer use `get_time()`?
-  (void)t;
+static void handle_second_tick(struct tm *tick_time, TimeUnits units_changed) {
   static int waitaminute=0;
 
   waitaminute++;
   waitaminute = (waitaminute % 5);
 
-  if (waitaminute == 0) layer_mark_dirty(&display_layer);
+  if (waitaminute == 0) layer_mark_dirty(display_layer);
 
 }
 
-void handle_init(AppContextRef ctx) {
+void handle_init(void) {
+  window = window_create();
+  window_stack_push(window, true);
 
-  (void)ctx;
-  PblTm t;
+  window_set_background_color(window, GColorBlack);
 
-  get_time(&t);
-
-  window_init(&window, WINDOW_NAME);
-  window_stack_push(&window, true);
-
-  window_set_background_color(&window, GColorBlack);
+  Layer *window_layer = window_get_root_layer(window);
 
   // Init the layer for the display
-  layer_init(&display_layer, GRect(0, 0, 144, 150));
-  display_layer.update_proc = &display_layer_update_callback;
-  layer_add_child(&window.layer, &display_layer);
+  display_layer = layer_create(GRect(0, 0, 144, 150));
+  layer_set_update_proc(display_layer, display_layer_update_callback);
+  layer_add_child(window_layer, display_layer);
 
 /*
 */
-  text_layer_init(&bottombar_layer, GRect(0, 150, 144, 18));
-  text_layer_set_text_color(&bottombar_layer, GColorWhite);
-  text_layer_set_background_color(&bottombar_layer, GColorBlack);
-  text_layer_set_font(&bottombar_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-  text_layer_set_text_alignment(&bottombar_layer, GTextAlignmentCenter);
-  layer_add_child(&window.layer, &bottombar_layer.layer);
+  bottombar_layer = text_layer_create(GRect(0, 150, 144, 18));
+  text_layer_set_text_color(bottombar_layer, GColorWhite);
+  text_layer_set_background_color(bottombar_layer, GColorBlack);
+  text_layer_set_font(bottombar_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+  text_layer_set_text_alignment(bottombar_layer, GTextAlignmentCenter);
+  Layer *bottombar_layer_layer = text_layer_get_layer(bottombar_layer);
+  layer_add_child(window_layer, bottombar_layer_layer);
 
   //Only set the seed once
   randSeed = get_unix_time();
 
+  tick_timer_service_subscribe(SECOND_UNIT, handle_second_tick);
+
 }
 
-void pbl_main(void *params) {
+void handle_deinit(void) {
+  tick_timer_service_unsubscribe();
+  text_layer_destroy(bottombar_layer);
+  layer_destroy(display_layer);
+  window_destroy(window);
+}
 
-  PebbleAppHandlers handlers = {
-    .init_handler = &handle_init,
-
-    .tick_info = {
-      .tick_handler = &handle_second_tick,
-      .tick_units = SECOND_UNIT
-    }
-  };
-  app_event_loop(params, &handlers);
-
+int main(void) {
+  handle_init();
+  app_event_loop();
+  handle_deinit();
 }
